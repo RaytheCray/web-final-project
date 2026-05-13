@@ -219,7 +219,9 @@ function formatDate(iso) {
 }
 
 .notes-input {
+  display: block;
   width: 100%;
+  min-width: 160px;
   background: #0d1117;
   border: 1px solid #30363d;
   border-radius: 6px;
@@ -227,7 +229,7 @@ function formatDate(iso) {
   padding: 0.35rem 0.5rem;
   font-size: 0.85rem;
   font-family: inherit;
-  resize: vertical;
+  resize: none;
   outline: none;
 }
 
