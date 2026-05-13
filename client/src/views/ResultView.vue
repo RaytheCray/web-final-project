@@ -10,17 +10,40 @@ const router = useRouter()
 const data = ref(null)
 const loading = ref(true)
 const lookupError = ref('')
+const isPrivate = ref(false)
 
 const notes = ref('')
 const threatLevel = ref('Unknown')
 const saving = ref(false)
 const saved = ref(false)
 
+function getPrivateRangeInfo(ip) {
+  const parts = ip.split('.').map(Number)
+  if (parts[0] === 10)
+    return { range: '10.0.0.0/8', label: 'Class A Private' }
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    return { range: '172.16.0.0/12', label: 'Class B Private' }
+  if (parts[0] === 192 && parts[1] === 168)
+    return { range: '192.168.0.0/16', label: 'Class C Private' }
+  if (parts[0] === 127)
+    return { range: '127.0.0.0/8', label: 'Loopback' }
+  if (parts[0] === 169 && parts[1] === 254)
+    return { range: '169.254.0.0/16', label: 'Link-Local' }
+  return { range: 'Private / Reserved', label: 'Private' }
+}
+
+const privateRangeInfo = ref(null)
+
 onMounted(async () => {
   try {
     const result = await lookupIP(route.params.ip)
     if (result.status === 'fail') {
-      lookupError.value = result.message || 'Invalid IP address.'
+      if (result.message === 'private range') {
+        isPrivate.value = true
+        privateRangeInfo.value = getPrivateRangeInfo(route.params.ip)
+      } else {
+        lookupError.value = result.message || 'Invalid IP address.'
+      }
     } else {
       data.value = result
     }
@@ -57,6 +80,50 @@ async function saveToWatchlist() {
 
     <div v-if="loading" class="status-msg">Looking up {{ route.params.ip }}...</div>
     <div v-else-if="lookupError" class="error-msg">{{ lookupError }}</div>
+
+    <div v-else-if="isPrivate" class="private-panel">
+      <div class="private-icon">&#127968;</div>
+      <div class="private-body">
+        <h2 class="private-title">Private IP Address</h2>
+        <p class="private-ip">{{ route.params.ip }}</p>
+        <span class="private-badge">{{ privateRangeInfo.label }} &mdash; {{ privateRangeInfo.range }}</span>
+
+        <p class="private-desc">
+          This IP address belongs to a <strong>private address range</strong> defined by
+          <a href="https://datatracker.ietf.org/doc/html/rfc1918" target="_blank" rel="noopener">RFC 1918</a>.
+          Private IPs are used exclusively within local networks — home routers, office LANs, and internal
+          infrastructure — and are never routed over the public internet.
+        </p>
+
+        <div class="private-reasons">
+          <div class="reason">
+            <span class="reason-icon">&#128683;</span>
+            <div>
+              <strong>Not publicly routable</strong>
+              <p>Internet service providers drop packets destined for private ranges. These addresses only exist inside a local network.</p>
+            </div>
+          </div>
+          <div class="reason">
+            <span class="reason-icon">&#128100;</span>
+            <div>
+              <strong>Could be anyone</strong>
+              <p>Millions of devices share the same private address space. <span class="mono">192.168.1.1</span> is a common home router address used by hundreds of millions of households.</p>
+            </div>
+          </div>
+          <div class="reason">
+            <span class="reason-icon">&#128204;</span>
+            <div>
+              <strong>No geolocation data</strong>
+              <p>Geolocation databases map IPs to physical locations using public registration records. Private IPs have no such records.</p>
+            </div>
+          </div>
+        </div>
+
+        <p class="private-tip">
+          If you saw this IP in a log, it originated from a device on the <em>same local network</em> as the server — not from the internet.
+        </p>
+      </div>
+    </div>
 
     <template v-else-if="data">
       <h2 class="ip-title">{{ data.query }}</h2>
@@ -207,4 +274,80 @@ h3 { color: #c9d1d9; margin-bottom: 1rem; font-size: 1rem; }
 
 .saved-msg { color: #3fb950; font-size: 0.95rem; }
 .link-btn { background: none; border: none; color: #58a6ff; cursor: pointer; font-size: inherit; text-decoration: underline; }
+
+/* Private range panel */
+.private-panel {
+  display: flex;
+  gap: 1.5rem;
+  background: #161b22;
+  border: 1px solid #d29922;
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.private-icon { font-size: 2.8rem; flex-shrink: 0; line-height: 1; }
+
+.private-body { display: flex; flex-direction: column; gap: 0.9rem; }
+
+.private-title { font-size: 1.5rem; color: #d29922; }
+
+.private-ip { font-family: monospace; font-size: 1.1rem; color: #58a6ff; }
+
+.private-badge {
+  display: inline-block;
+  background: #4a3800;
+  color: #d29922;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.75rem;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  width: fit-content;
+}
+
+.private-desc {
+  color: #c9d1d9;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  max-width: 620px;
+}
+
+.private-desc a { color: #58a6ff; text-decoration: underline; }
+
+.private-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid #30363d;
+  padding-top: 0.9rem;
+}
+
+.reason {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+}
+
+.reason-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 0.05rem; }
+
+.reason strong { display: block; color: #c9d1d9; font-size: 0.9rem; margin-bottom: 0.2rem; }
+
+.reason p { color: #8b949e; font-size: 0.85rem; line-height: 1.5; margin: 0; }
+
+.private-tip {
+  background: #21262d;
+  border-left: 3px solid #d29922;
+  padding: 0.7rem 1rem;
+  border-radius: 0 6px 6px 0;
+  color: #8b949e;
+  font-size: 0.87rem;
+  line-height: 1.5;
+}
+
+.mono { font-family: monospace; }
+
+@media (max-width: 600px) {
+  .private-panel { flex-direction: column; }
+  .private-icon { font-size: 2rem; }
+}
 </style>
