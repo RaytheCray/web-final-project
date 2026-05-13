@@ -11,6 +11,7 @@ const data = ref(null)
 const loading = ref(true)
 const lookupError = ref('')
 const isPrivate = ref(false)
+const isReserved = ref(false)
 
 const notes = ref('')
 const threatLevel = ref('Unknown')
@@ -25,14 +26,36 @@ function getPrivateRangeInfo(ip) {
     return { range: '172.16.0.0/12', label: 'Class B Private' }
   if (parts[0] === 192 && parts[1] === 168)
     return { range: '192.168.0.0/16', label: 'Class C Private' }
+  return { range: 'Private', label: 'Private' }
+}
+
+function getReservedRangeInfo(ip) {
+  const parts = ip.split('.').map(Number)
   if (parts[0] === 127)
-    return { range: '127.0.0.0/8', label: 'Loopback' }
+    return { range: '127.0.0.0/8', label: 'Loopback', rfc: 'RFC 1122', desc: 'Traffic sent to this address loops back to the same machine without touching the network. Used by applications to communicate with themselves.' }
+  if (parts[0] === 0)
+    return { range: '0.0.0.0/8', label: 'This Network', rfc: 'RFC 1122', desc: 'Represents an unknown or unspecified source address. Devices use it before they have been assigned an IP address (e.g. during DHCP negotiation).' }
   if (parts[0] === 169 && parts[1] === 254)
-    return { range: '169.254.0.0/16', label: 'Link-Local' }
-  return { range: 'Private / Reserved', label: 'Private' }
+    return { range: '169.254.0.0/16', label: 'Link-Local', rfc: 'RFC 3927', desc: 'Automatically assigned when a device cannot reach a DHCP server. Only valid between devices on the same physical network segment and not routed beyond it.' }
+  if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127)
+    return { range: '100.64.0.0/10', label: 'Shared Address Space', rfc: 'RFC 6598', desc: 'Used by internet service providers for carrier-grade NAT — a layer of address translation between the ISP and the customer. Not reachable from the public internet.' }
+  if (parts[0] >= 224 && parts[0] <= 239)
+    return { range: '224.0.0.0/4', label: 'Multicast', rfc: 'RFC 1112', desc: 'Reserved for one-to-many communication. Routers and network protocols use this range to send packets to multiple subscribers simultaneously (e.g. streaming, routing protocols).' }
+  if (parts[0] >= 240)
+    return { range: '240.0.0.0/4', label: 'Reserved for Future Use', rfc: 'RFC 1112', desc: 'Set aside by IANA for potential future protocols. These addresses have never been publicly allocated and are not routable on the internet.' }
+  if (ip === '255.255.255.255')
+    return { range: '255.255.255.255/32', label: 'Limited Broadcast', rfc: 'RFC 919', desc: 'The limited broadcast address. Packets sent here are delivered to all hosts on the local network segment but are never forwarded by routers.' }
+  if (parts[0] === 192 && parts[1] === 0 && parts[2] === 2)
+    return { range: '192.0.2.0/24', label: 'Documentation (TEST-NET-1)', rfc: 'RFC 5737', desc: 'Reserved exclusively for use in documentation, textbooks, and examples. These addresses must never appear in real network traffic.' }
+  if (parts[0] === 198 && parts[1] === 51 && parts[2] === 100)
+    return { range: '198.51.100.0/24', label: 'Documentation (TEST-NET-2)', rfc: 'RFC 5737', desc: 'Reserved exclusively for use in documentation, textbooks, and examples. These addresses must never appear in real network traffic.' }
+  if (parts[0] === 203 && parts[1] === 0 && parts[2] === 113)
+    return { range: '203.0.113.0/24', label: 'Documentation (TEST-NET-3)', rfc: 'RFC 5737', desc: 'Reserved exclusively for use in documentation, textbooks, and examples. These addresses must never appear in real network traffic.' }
+  return { range: 'Reserved', label: 'Reserved', rfc: 'RFC 6890', desc: 'This address falls within a range reserved by IANA for special purposes. It is not assigned to any public entity and cannot be tracked or geolocated.' }
 }
 
 const privateRangeInfo = ref(null)
+const reservedRangeInfo = ref(null)
 
 onMounted(async () => {
   try {
@@ -41,6 +64,9 @@ onMounted(async () => {
       if (result.message === 'private range') {
         isPrivate.value = true
         privateRangeInfo.value = getPrivateRangeInfo(route.params.ip)
+      } else if (result.message === 'reserved range') {
+        isReserved.value = true
+        reservedRangeInfo.value = getReservedRangeInfo(route.params.ip)
       } else {
         lookupError.value = result.message || 'Invalid IP address.'
       }
@@ -121,6 +147,56 @@ async function saveToWatchlist() {
 
         <p class="private-tip">
           If you saw this IP in a log, it originated from a device on the <em>same local network</em> as the server — not from the internet.
+        </p>
+      </div>
+    </div>
+
+    <div v-else-if="isReserved" class="reserved-panel">
+      <div class="reserved-icon">&#128736;</div>
+      <div class="reserved-body">
+        <h2 class="reserved-title">Reserved IP Address</h2>
+        <p class="reserved-ip">{{ route.params.ip }}</p>
+        <span class="reserved-badge">{{ reservedRangeInfo.label }} &mdash; {{ reservedRangeInfo.range }}</span>
+
+        <p class="reserved-desc">
+          This IP address falls within a <strong>reserved address range</strong> ({{ reservedRangeInfo.rfc }}).
+          Reserved ranges are set aside by IANA — the authority that manages global IP allocation — for
+          special technical purposes. They are never assigned to any organization or individual and
+          cannot be tracked or geolocated.
+        </p>
+
+        <div class="reserved-highlight">
+          <span class="highlight-label">What this range is used for</span>
+          <p>{{ reservedRangeInfo.desc }}</p>
+        </div>
+
+        <div class="reserved-reasons">
+          <div class="reason">
+            <span class="reason-icon">&#128683;</span>
+            <div>
+              <strong>Not internet-routable</strong>
+              <p>Routers on the public internet will never forward packets to or from reserved addresses. They only function within their specific intended context.</p>
+            </div>
+          </div>
+          <div class="reason">
+            <span class="reason-icon">&#128204;</span>
+            <div>
+              <strong>No geolocation records</strong>
+              <p>Geolocation databases only contain entries for publicly assigned IPs. Reserved ranges have no owner, ISP, or physical location on record.</p>
+            </div>
+          </div>
+          <div class="reason">
+            <span class="reason-icon">&#128220;</span>
+            <div>
+              <strong>Governed by IANA</strong>
+              <p>The Internet Assigned Numbers Authority (IANA) maintains the Special-Purpose Address Registry, which defines exactly what each reserved block is allowed to be used for.</p>
+            </div>
+          </div>
+        </div>
+
+        <p class="reserved-tip">
+          If you encountered this address in a log or packet capture, it was generated locally by the
+          operating system or a network protocol — <em>not</em> by a remote host on the internet.
         </p>
       </div>
     </div>
@@ -349,5 +425,89 @@ h3 { color: #c9d1d9; margin-bottom: 1rem; font-size: 1rem; }
 @media (max-width: 600px) {
   .private-panel { flex-direction: column; }
   .private-icon { font-size: 2rem; }
+}
+
+/* Reserved range panel */
+.reserved-panel {
+  display: flex;
+  gap: 1.5rem;
+  background: #161b22;
+  border: 1px solid #58a6ff;
+  border-radius: 12px;
+  padding: 2rem;
+}
+
+.reserved-icon { font-size: 2.8rem; flex-shrink: 0; line-height: 1; }
+
+.reserved-body { display: flex; flex-direction: column; gap: 0.9rem; }
+
+.reserved-title { font-size: 1.5rem; color: #58a6ff; }
+
+.reserved-ip { font-family: monospace; font-size: 1.1rem; color: #58a6ff; }
+
+.reserved-badge {
+  display: inline-block;
+  background: #1a2d4a;
+  color: #58a6ff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.75rem;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  width: fit-content;
+}
+
+.reserved-desc {
+  color: #c9d1d9;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  max-width: 620px;
+}
+
+.reserved-highlight {
+  background: #1a2d4a;
+  border-left: 3px solid #58a6ff;
+  border-radius: 0 6px 6px 0;
+  padding: 0.8rem 1rem;
+}
+
+.highlight-label {
+  display: block;
+  color: #58a6ff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35rem;
+}
+
+.reserved-highlight p {
+  color: #c9d1d9;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.reserved-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid #30363d;
+  padding-top: 0.9rem;
+}
+
+.reserved-tip {
+  background: #21262d;
+  border-left: 3px solid #58a6ff;
+  padding: 0.7rem 1rem;
+  border-radius: 0 6px 6px 0;
+  color: #8b949e;
+  font-size: 0.87rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 600px) {
+  .reserved-panel { flex-direction: column; }
+  .reserved-icon { font-size: 2rem; }
 }
 </style>
